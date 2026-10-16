@@ -62,10 +62,10 @@ namespace
     GLuint CreateShaderProgram()
     {
         const std::string vertexSource =
-            LoadShaderFile("src/Shaders/particle.vert");
+            LoadShaderFile("Shaders/particle.vert");
 
         const std::string fragmentSource =
-            LoadShaderFile("src/Shaders/particle.frag");
+            LoadShaderFile("Shaders/particle.frag");
 
         if (vertexSource.empty() || fragmentSource.empty())
             return 0;

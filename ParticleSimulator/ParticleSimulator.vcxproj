@@ -157,9 +157,9 @@
     <ClInclude Include="src\ParticleSystem.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="src\Shaders\build_grid.comp" />
-    <None Include="src\Shaders\particle.frag" />
-    <None Include="src\Shaders\particle.vert" />
+    <None Include="Shaders\build_grid.comp" />
+    <None Include="Shaders\particle.frag" />
+    <None Include="Shaders\particle.vert" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
