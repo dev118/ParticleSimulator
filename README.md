@@ -65,13 +65,13 @@ in the repository.
 
 ## Controls
 
-'W / A / S / D'	  Move the camera
-'Mouse wheel'	Zoom in or out
-'R'	Reset the camera
-'Gravity slider'	Adjust gravity
-'Particle radius slider'	Change particle size
-'Pause simulation'	Pause or resume simulation
-'Reset particles'	Reinitialize particle positions
+`W / A / S / D`	Move the camera
+`Mouse wheel`	Zoom in or out
+`R`	Reset the camera
+`Gravity slider`	Adjust gravity
+`Particle radius slider`	Change particle size
+`Pause simulation`	Pause or resume simulation
+`Reset particles`	Reinitialize particle positions
 
 ## Acknowledgements
 
@@ -84,3 +84,4 @@ in the repository.
 
 Check the repository for the applicable license and the licenses of its
 third-party dependencies.
+
