@@ -35,7 +35,12 @@ namespace
         return buffer.str();
     }
 
-    GLuint CompileShader( GLenum type, const std::string& source){
+
+    GLuint CompileShader(
+        GLenum type,
+        const std::string& source,
+        const char* shaderName = "unknown")
+    {
         GLuint shader = glCreateShader(type);
 
         const char* sourcePointer = source.c_str();
@@ -48,15 +53,83 @@ namespace
         if (!success)
         {
             char log[1024]{};
-            glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+            glGetShaderInfoLog(
+                shader,
+                sizeof(log),
+                nullptr,
+                log
+            );
 
-            std::cerr << "Shader compilation failed:\n" << log << '\n';
+            std::cerr << "Shader compilation failed ("
+                << shaderName << "):\n"
+                << log << '\n';
 
             glDeleteShader(shader);
             return 0;
         }
 
         return shader;
+    }
+
+    GLuint CompileComputeShader(const std::string& path)
+    {
+        const std::string source = LoadShaderFile(path.c_str());
+
+        if (source.empty())
+            return 0;
+
+        GLuint shader = CompileShader(
+            GL_COMPUTE_SHADER,
+            source
+        );
+
+        if (!shader)
+        {
+            std::cerr << "Failed to compile compute shader: "
+                << path << '\n';
+            return 0;
+        }
+
+        return shader;
+    }
+
+    GLuint CreateComputeProgram(const std::string& path)
+    {
+        GLuint computeShader = CompileComputeShader(path);
+
+        if (!computeShader)
+            return 0;
+
+        GLuint program = glCreateProgram();
+
+        glAttachShader(program, computeShader);
+        glLinkProgram(program);
+
+        GLint success = GL_FALSE;
+        glGetProgramiv(program, GL_LINK_STATUS, &success);
+
+        if (!success)
+        {
+            char log[1024]{};
+
+            glGetProgramInfoLog(
+                program,
+                sizeof(log),
+                nullptr,
+                log
+            );
+
+            std::cerr << "Compute program linking failed for "
+                << path << ":\n"
+                << log << '\n';
+
+            glDeleteProgram(program);
+            program = 0;
+        }
+
+        glDeleteShader(computeShader);
+
+        return program;
     }
 
     GLuint CreateShaderProgram()
@@ -71,13 +144,15 @@ namespace
             return 0;
 
         GLuint vertexShader =
-            CompileShader(GL_VERTEX_SHADER, vertexSource);
+            CompileShader(GL_VERTEX_SHADER, vertexSource,
+                "particle.vert");
 
         if (!vertexShader)
             return 0;
 
         GLuint fragmentShader =
-            CompileShader(GL_FRAGMENT_SHADER, fragmentSource);
+            CompileShader(GL_FRAGMENT_SHADER, fragmentSource,
+                "particle.frag");
 
         if (!fragmentShader)
         {
@@ -111,6 +186,61 @@ namespace
 
         return program;
     }
+
+    GLuint CreateGPUShaderProgram()
+    {
+        const std::string vertexSource =
+            LoadShaderFile("Shaders/particle_gpu.vert");
+
+        const std::string fragmentSource =
+            LoadShaderFile("Shaders/particle_gpu.frag");
+
+        if (vertexSource.empty() || fragmentSource.empty())
+            return 0;
+
+        GLuint vertexShader =
+            CompileShader(GL_VERTEX_SHADER, vertexSource,
+                "particle_gpu.vert");
+
+        if (!vertexShader)
+            return 0;
+
+        GLuint fragmentShader =
+            CompileShader(GL_FRAGMENT_SHADER, fragmentSource,
+                "particle_gpu.frag");
+
+        if (!fragmentShader)
+        {
+            glDeleteShader(vertexShader);
+            return 0;
+        }
+
+        GLuint program = glCreateProgram();
+
+        glAttachShader(program, vertexShader);
+        glAttachShader(program, fragmentShader);
+        glLinkProgram(program);
+
+        GLint success = GL_FALSE;
+        glGetProgramiv(program, GL_LINK_STATUS, &success);
+
+        if (!success)
+        {
+            char log[1024]{};
+            glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+
+            std::cerr << "GPU particle shader linking failed:\n"
+                << log << '\n';
+
+            glDeleteProgram(program);
+            program = 0;
+        }
+
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+
+        return program;
+    }
 }
 
 bool ParticleRenderer::Initialize()
@@ -119,6 +249,15 @@ bool ParticleRenderer::Initialize()
 
     if (!shaderProgram)
         return false;
+
+    gpuParticleProgram = CreateGPUShaderProgram();
+
+    if (!gpuParticleProgram)
+    {
+        glDeleteProgram(shaderProgram);
+        shaderProgram = 0;
+        return false;
+    }
 
     cameraPositionLocation =
         glGetUniformLocation(shaderProgram, "cameraPosition");
@@ -131,6 +270,18 @@ bool ParticleRenderer::Initialize()
 
     particleRadiusLocation =
         glGetUniformLocation(shaderProgram, "particleRadius");
+
+    gpuCameraPositionLocation =
+        glGetUniformLocation(gpuParticleProgram, "cameraPosition");
+
+    gpuZoomLocation =
+        glGetUniformLocation(gpuParticleProgram, "zoom");
+
+    gpuScreenSizeLocation =
+        glGetUniformLocation(gpuParticleProgram, "screenSize");
+
+    gpuParticleRadiusLocation =
+        glGetUniformLocation(gpuParticleProgram, "particleRadius");
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -226,6 +377,69 @@ void ParticleRenderer::Render(
     glBindVertexArray(0);
 }
 
+
+void ParticleRenderer::RenderGPU(
+    const GpuParticleSystem& particles,
+    float cameraX,
+    float cameraY,
+    float zoom,
+    int screenWidth,
+    int screenHeight,
+    float particleRadius
+)
+{
+    if (screenWidth <= 0 || screenHeight <= 0)
+        return;
+
+    const GLuint particleBuffer =
+        particles.GetParticleBuffer();
+
+    const std::size_t particleCount =
+        particles.GetParticleCount();
+
+    if (particleBuffer == 0 || particleCount == 0)
+        return;
+
+    glUseProgram(gpuParticleProgram);
+
+    glUniform2f(
+        gpuCameraPositionLocation,
+        cameraX,
+        cameraY
+    );
+
+    glUniform1f(gpuZoomLocation, zoom);
+
+    glUniform2f(
+        gpuScreenSizeLocation,
+        static_cast<float>(screenWidth),
+        static_cast<float>(screenHeight)
+    );
+
+    glUniform1f(
+        gpuParticleRadiusLocation,
+        particleRadius
+    );
+
+    // Binding 0 matches particle_gpu.vert.
+    glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER,
+        0,
+        particleBuffer
+    );
+
+    glBindVertexArray(VAO);
+
+    glDrawArrays(
+        GL_POINTS,
+        0,
+        static_cast<GLsizei>(particleCount)
+    );
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
 void ParticleRenderer::Shutdown()
 {
     if (VBO)
@@ -237,7 +451,11 @@ void ParticleRenderer::Shutdown()
     if (shaderProgram)
         glDeleteProgram(shaderProgram);
 
+    if (gpuParticleProgram)
+        glDeleteProgram(gpuParticleProgram);
+
     VBO = 0;
     VAO = 0;
     shaderProgram = 0;
+    gpuParticleProgram = 0;
 }

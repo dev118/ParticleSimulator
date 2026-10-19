@@ -10,10 +10,5 @@ struct Camera2D
     float moveSpeed = 400.0f;
     float zoomSpeed = 0.1f;
 
-    void Reset()
-    {
-        x = 0.0f;
-        y = 0.0f;
-        zoom = 1.0f;
-    }
+    void Reset();
 };

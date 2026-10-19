@@ -13,6 +13,7 @@
 #include "ParticleSystem.h"
 #include "ParticleRenderer.h"
 #include "Camera2D.h"
+#include "GpuParticleSystem.h"
 
 #ifdef _WIN32
 
@@ -47,6 +48,8 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    //glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    //glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     GLFWwindow* window = glfwCreateWindow(
         1280, 720,
@@ -111,6 +114,19 @@ int main()
 
     ParticleSystem particleSystem(PARTICLE_COUNT);
     particleSystem.SetParticleRadius(particleRadius);
+
+    GpuParticleSystem gpuParticleSystem;
+
+    if (!gpuParticleSystem.Initialize(particleSystem))
+    {
+        std::cerr << "Failed to initialize GPU particle system.\n";
+        return -1;
+    }
+
+   /* gpuParticleSystem.SetComputePrograms(
+        buildGridProgram,
+        solveCollisionsProgram);*/
+
     // Main rendering loop.
     bool paused = false;
 
@@ -145,6 +161,11 @@ int main()
         if (ImGui::Button("Reset particles"))
         {
             particleSystem.Reset();
+
+            if (!gpuParticleSystem.Initialize(particleSystem))
+            {
+                std::cerr << "Failed to reset GPU particle system.\n";
+            }
         }
 
         ImGui::Text(
@@ -202,7 +223,8 @@ int main()
         // Update particle physics.
         if (!paused)
         {
-            particleSystem.Update(deltaTime);
+            //particleSystem.Update(deltaTime);
+            gpuParticleSystem.Simulate(deltaTime,gravity, particleRadius, 0.2);
         }
 
         // Get framebuffer dimensions for correct window scaling.
@@ -216,7 +238,7 @@ int main()
             glClearColor(0.02f, 0.02f, 0.04f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
-            particleRenderer.Render(
+            /*particleRenderer.Render(
                 particleSystem.GetParticles(),
                 camera.x,
                 camera.y,
@@ -224,7 +246,16 @@ int main()
                 width,
                 height,
                 particleRadius
-            );
+            );*/
+
+            particleRenderer.RenderGPU(
+                gpuParticleSystem,
+                camera.x,
+                camera.y,
+                camera.zoom,
+                width,
+                height,
+                particleRadius);
         }
 
         ImGui::Render();
@@ -243,6 +274,7 @@ int main()
     ImGui::DestroyContext();
 
     particleRenderer.Shutdown();
+    gpuParticleSystem.Shutdown();
 
     glfwDestroyWindow(window);
     glfwTerminate();

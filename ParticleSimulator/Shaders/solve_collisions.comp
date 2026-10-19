@@ -1,0 +1,163 @@
+
+#version 430 core
+
+layout(local_size_x = 256) in;
+
+struct Particle
+{
+    vec2 position;
+    vec2 velocity;
+    vec4 color;
+};
+
+layout(std430, binding = 0) readonly buffer ParticleInput
+{
+    Particle inputParticles[];
+};
+
+layout(std430, binding = 1) writeonly buffer ParticleOutput
+{
+    Particle outputParticles[];
+};
+
+layout(std430, binding = 2) readonly buffer GridHeads
+{
+    int gridHeads[];
+};
+
+layout(std430, binding = 3) readonly buffer GridNext
+{
+    int gridNext[];
+};
+
+uniform uint particleCount;
+uniform ivec2 gridDimensions;
+uniform float cellSize;
+uniform float particleRadius;
+uniform float deltaTime;
+uniform float gravity;
+uniform float restitution;
+
+uniform vec2 worldMin;
+uniform vec2 worldMax;
+
+int GetCellIndex(ivec2 cell)
+{
+    return cell.y * gridDimensions.x + cell.x;
+}
+
+ivec2 GetCell(vec2 position)
+{
+    return ivec2(floor((position - worldMin) / cellSize));
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+
+    if (i >= particleCount)
+        return;
+
+    Particle p = inputParticles[i];
+
+    // Integrate velocity and position.
+    p.velocity.y += gravity * deltaTime;
+    p.position += p.velocity * deltaTime;
+
+    float diameter = particleRadius * 2.0;
+    float diameterSquared = diameter * diameter;
+
+    ivec2 cell = GetCell(inputParticles[i].position);
+
+    // Check this cell and its eight neighbors.
+    for (int y = -1; y <= 1; ++y)
+    {
+        for (int x = -1; x <= 1; ++x)
+        {
+            ivec2 neighborCell = cell + ivec2(x, y);
+
+            if (any(lessThan(neighborCell, ivec2(0))) ||
+                any(greaterThanEqual(neighborCell, gridDimensions)))
+                continue;
+
+            int cellIndex = GetCellIndex(neighborCell);
+            int j = gridHeads[cellIndex];
+
+            // Follow the linked list for this cell.
+            while (j != -1)
+            {
+                if (uint(j) != i)
+                {
+                    Particle other = inputParticles[j];
+
+                    vec2 difference =
+                        p.position - other.position;
+
+                    float distanceSquared =
+                        dot(difference, difference);
+
+                    if (distanceSquared < diameterSquared)
+                    {
+                        float distance = sqrt(distanceSquared);
+
+                        vec2 normal;
+
+                        if (distance > 0.0001)
+                            normal = difference / distance;
+                        else
+                            normal = vec2(1.0, 0.0);
+
+                        float penetration = diameter - distance;
+
+                        // Split positional correction between
+                        // the two particles.
+                        p.position += normal * (penetration * 0.5);
+
+                        // Equal-mass collision response.
+                        vec2 relativeVelocity =
+                            p.velocity - other.velocity;
+
+                        float normalSpeed =
+                            dot(relativeVelocity, normal);
+
+                        if (normalSpeed < 0.0)
+                        {
+                            float impulse =
+                                -(1.0 + restitution)
+                                * normalSpeed * 0.5;
+
+                            p.velocity += impulse * normal;
+                        }
+                    }
+                }
+
+                j = gridNext[j];
+            }
+        }
+    }
+    int maxSpeed = 1000;
+    // Reflect at the simulation boundaries.
+    if (p.position.x < worldMin.x + particleRadius)
+    {
+        p.position.x = worldMin.x + particleRadius;
+        p.velocity.x = abs(p.velocity.x) * restitution;
+    }
+    else if (p.position.x > worldMax.x - particleRadius)
+    {
+        p.position.x = worldMax.x - particleRadius;
+        p.velocity.x = -abs(p.velocity.x)* restitution;
+    }
+
+    if (p.position.y < worldMin.y + particleRadius)
+    {
+        p.position.y = worldMin.y + particleRadius;
+        p.velocity.y = abs(p.velocity.y) * restitution;
+    }
+    else if (p.position.y > worldMax.y - particleRadius)
+    {
+        p.position.y = worldMax.y - particleRadius;
+        p.velocity.y = -abs(p.velocity.y) * restitution;
+    }
+
+    outputParticles[i] = p;
+}

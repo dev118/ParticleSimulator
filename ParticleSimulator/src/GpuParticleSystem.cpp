@@ -10,6 +10,106 @@
 
 namespace
 {
+    std::string LoadComputeShaderFile(const char* path)
+    {
+        std::ifstream file(path);
+
+        if (!file)
+        {
+            std::cerr << "Failed to open compute shader: "
+                << path << '\n';
+            return {};
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+
+        return buffer.str();
+    }
+
+    GLuint CompileComputeShader(const std::string& path)
+    {
+        const std::string source =
+            LoadComputeShaderFile(path.c_str());
+
+        if (source.empty())
+            return 0;
+
+        GLuint shader = glCreateShader(GL_COMPUTE_SHADER);
+
+        const char* sourcePointer = source.c_str();
+
+        glShaderSource(shader, 1, &sourcePointer, nullptr);
+        glCompileShader(shader);
+
+        GLint success = GL_FALSE;
+
+        glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+
+        if (!success)
+        {
+            char log[1024]{};
+
+            glGetShaderInfoLog(
+                shader,
+                sizeof(log),
+                nullptr,
+                log
+            );
+
+            std::cerr << "Compute shader compilation failed ("
+                << path << "):\n"
+                << log << '\n';
+
+            glDeleteShader(shader);
+            return 0;
+        }
+
+        return shader;
+    }
+
+    GLuint CreateComputeProgram(const char* path)
+    {
+        GLuint computeShader = CompileComputeShader(path);
+
+        if (!computeShader)
+            return 0;
+
+        GLuint program = glCreateProgram();
+
+        glAttachShader(program, computeShader);
+        glLinkProgram(program);
+
+        GLint success = GL_FALSE;
+
+        glGetProgramiv(program, GL_LINK_STATUS, &success);
+
+        if (!success)
+        {
+            char log[1024]{};
+
+            glGetProgramInfoLog(
+                program,
+                sizeof(log),
+                nullptr,
+                log
+            );
+
+            std::cerr << "Compute program linking failed ("
+                << path << "):\n"
+                << log << '\n';
+
+            glDeleteProgram(program);
+            program = 0;
+        }
+
+        glDeleteShader(computeShader);
+
+        return program;
+    }
+}
+namespace
+{
     // World bounds: -500 to 500 horizontally,
     // -300 to 300 vertically.
     constexpr float WORLD_LEFT = -500.0f;
@@ -32,6 +132,17 @@ bool GpuParticleSystem::Initialize( const ParticleSystem& source)
 {
     Shutdown();
 
+    buildGridProgram =
+        CreateComputeProgram("Shaders/build_grid.comp");
+
+    collisionProgram =
+        CreateComputeProgram("Shaders/solve_collisions.comp");
+
+    if (!buildGridProgram || !collisionProgram)
+    {
+        Shutdown();
+        return false;
+    }
     const auto& particles = source.GetParticles();
     particleCount = particles.size();
 
@@ -54,7 +165,9 @@ bool GpuParticleSystem::Initialize( const ParticleSystem& source)
     for (const Particle& p : particles)
     {
         initialParticles.push_back({
-            p.x, p.y, p.vx, p.vy
+            p.x, p.y,
+            p.vx, p.vy,
+            p.r, p.g, p.b, 1.0f
             });
     }
 
@@ -128,6 +241,15 @@ void GpuParticleSystem::Shutdown()
 
     particleCount = 0;
     activeBuffer = 0;
+
+    if (buildGridProgram)
+        glDeleteProgram(buildGridProgram);
+
+    if (collisionProgram)
+        glDeleteProgram(collisionProgram);
+
+    buildGridProgram = 0;
+    collisionProgram = 0;
 }
 
 
@@ -195,6 +317,106 @@ bool GpuParticleSystem::BuildGrid()
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     return true;
+}
+
+
+void GpuParticleSystem::Simulate(
+    float deltaTime,
+    float gravity,
+    float particleRadius,
+    float restitution)
+{
+    if (particleCount == 0 ||
+        buildGridProgram == 0 ||
+        collisionProgram == 0)
+    {
+        return;
+    }
+
+    // Build the linked-list grid from the current particle buffer.
+    if (!BuildGrid())
+        return;
+
+    // The grid-building compute shader has finished writing
+    // the grid heads and linked-list indices.
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+    const int outputBuffer = 1 - activeBuffer;
+
+    glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER, 0,
+        particleBuffers[activeBuffer]);
+
+    glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER, 1,
+        particleBuffers[outputBuffer]);
+
+    glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER, 2,
+        gridHeadBuffer);
+
+    glBindBufferBase(
+        GL_SHADER_STORAGE_BUFFER, 3,
+        nextParticleBuffer);
+
+    glUseProgram(collisionProgram);
+
+    glUniform1ui(
+        glGetUniformLocation(collisionProgram, "particleCount"),
+        static_cast<GLuint>(particleCount));
+
+    glUniform2i(
+        glGetUniformLocation(collisionProgram, "gridDimensions"),
+        GRID_COLUMNS, GRID_ROWS);
+
+    glUniform1f(
+        glGetUniformLocation(collisionProgram, "cellSize"),
+        GRID_CELL_SIZE);
+
+    glUniform1f(
+        glGetUniformLocation(collisionProgram, "particleRadius"),
+        particleRadius);
+
+    glUniform1f(
+        glGetUniformLocation(collisionProgram, "deltaTime"),
+        deltaTime);
+
+    glUniform1f(
+        glGetUniformLocation(collisionProgram, "gravity"),
+        gravity);
+
+    glUniform1f(
+        glGetUniformLocation(collisionProgram, "restitution"),
+        restitution);
+
+    glUniform2f(
+        glGetUniformLocation(collisionProgram, "worldMin"),
+        WORLD_LEFT, WORLD_BOTTOM);
+
+    glUniform2f(
+        glGetUniformLocation(collisionProgram, "worldMax"),
+        WORLD_LEFT + GRID_COLUMNS * GRID_CELL_SIZE,
+        WORLD_BOTTOM + GRID_ROWS * GRID_CELL_SIZE);
+
+    const GLuint workGroups =
+        static_cast<GLuint>((particleCount + 255) / 256);
+
+    glDispatchCompute(workGroups, 1, 1);
+
+    // Make the newly written particle data available to later
+    // rendering and compute operations.
+    glMemoryBarrier(
+        GL_SHADER_STORAGE_BARRIER_BIT |
+        GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
+
+    glUseProgram(0);
+
+    activeBuffer = outputBuffer;
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, 0);
 }
 
 GLuint GpuParticleSystem::GetParticleBuffer() const

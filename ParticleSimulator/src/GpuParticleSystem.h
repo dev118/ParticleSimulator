@@ -24,6 +24,12 @@ public:
     void Shutdown();
     bool BuildGrid();
 
+    void Simulate(
+        float deltaTime,
+        float gravity,
+        float particleRadius,
+        float restitution);
+
     GLuint GetParticleBuffer() const;
     std::size_t GetParticleCount() const;
 
@@ -32,6 +38,7 @@ private:
     GLuint gridHeadBuffer = 0;
     GLuint nextParticleBuffer = 0;
     GLuint buildGridProgram = 0;
+    GLuint collisionProgram = 0;
 
     std::size_t particleCount = 0;
     int activeBuffer = 0;

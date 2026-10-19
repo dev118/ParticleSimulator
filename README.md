@@ -11,16 +11,12 @@ graphics-programming project and is being developed incrementally.
 
 ![Particle Simulator running](docs/images/particle-simulator.png)
 
-> To add your screenshot, create `docs/images/`, save the screenshot as
-> `particle-simulator.png`, and commit it to the repository. The image
-> above will then appear directly in the GitHub README.
-
 ## Features
 
 -   Real-time particle rendering with OpenGL
 -   Interactive interface built with Dear ImGui
 -   2D camera controls
--   CPU particle simulation and collision handling
+-   GPU particle simulation and collision handling
 -   Spatial-grid-based broad-phase collision optimization
 -   GPU particle-system and compute-shader experiments in progress
 
@@ -67,12 +63,14 @@ instructions may change as the build system is updated.
 If the solution or project file names change, follow the files present
 in the repository.
 
-## Development Notes
-
-This project is actively evolving. The GPU compute path is experimental
-and should not be considered a complete GPU-based collision solver yet.
-Performance and implementation details may change as the simulation
-develops.
+## Controls
+- **W / A / S / D**	Move the camera
+- **Mouse wheel**	Zoom in or out
+- **R**	Reset the camera
+- **Gravity slider**	Adjust gravity
+- **Particle radius slider**	Change particle size
+- **Pause simulation**	Pause or resume simulation
+- **Reset particles**	Reinitialize particle positions
 
 ## Acknowledgements
 
@@ -85,3 +83,4 @@ develops.
 
 Check the repository for the applicable license and the licenses of its
 third-party dependencies.
+

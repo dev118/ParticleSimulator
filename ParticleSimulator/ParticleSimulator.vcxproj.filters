@@ -70,5 +70,8 @@
     <None Include="Shaders\particle.vert" />
     <None Include="Shaders\particle.frag" />
     <None Include="Shaders\build_grid.comp" />
+    <None Include="Shaders\solve_collisions.comp" />
+    <None Include="Shaders\particle_gpu.vert" />
+    <None Include="Shaders\particle_gpu.frag" />
   </ItemGroup>
 </Project>
